@@ -22,10 +22,10 @@ class Transformer(nn.Module):
     def evaluate_single(self, x):
         Nc = self.L // self.b
 
-        Q = self.param('Q', nn.initializers.normal(), (self.b, self.b), jnp.complex128)
-        K = self.param('K', nn.initializers.normal(), (self.b, self.b), jnp.complex128)
-        V = self.param('V', nn.initializers.normal(), (self.b, self.b), jnp.complex128)
-        W = self.param('W', nn.initializers.normal(), (self.L, self.L), jnp.complex128)
+        Q = self.param('Q', nn.initializers.normal(stddev=1), (self.b, self.b), jnp.complex128)
+        K = self.param('K', nn.initializers.normal(stddev=1), (self.b, self.b), jnp.complex128)
+        V = self.param('V', nn.initializers.normal(stddev=1), (self.b, self.b), jnp.complex128)
+        W = self.param('W', nn.initializers.normal(stddev=1), (self.L, self.L), jnp.complex128)
 
         x = x.reshape(Nc, self.b)
 
@@ -41,21 +41,21 @@ class Transformer(nn.Module):
         return vtilde.T @ W @ vtilde
     
 
-L = 12
+L = 16
 b = 2
 
-diag_shift = 1e-3
+diag_shift = 0.001
 eta = 0.01
-N_opt = 100
+N_opt = 300
 N_samples = 3000 # number monte carlo samples
 N_discard = 0
 
-lattice = nk.graph.Chain(length=L, pbc=True, max_neighbor_order=1)
+lattice = nk.graph.Chain(length=L, pbc=True, max_neighbor_order=2)
 hilbert = nk.hilbert.Spin(s=1/2, N=lattice.n_nodes, total_sz=0)
 
-hamiltonian = nk.operator.Heisenberg(hilbert=hilbert, graph=lattice, J = 1.0, sign_rule=[False]) # 
-# hamiltonian = nk.operator.Heisenberg(hilbert=hilbert, graph=lattice, J = [1.0, 0.5]) 
-# hamiltonian = nk.operator.Heisenberg(hilbert=hilbert, graph=lattice, J = [1.0, 0], sign_rule=[True, False]) 
+# hamiltonian = nk.operator.Heisenberg(hilbert=hilbert, graph=lattice, J = 1.0, sign_rule=False) # 
+# hamiltonian = nk.operator.Heisenberg(hilbert=hilbert, graph=lattice, J = [1.0, 0.4], sign_rule=[False, False]) 
+hamiltonian = nk.operator.Heisenberg(hilbert=hilbert, graph=lattice, J = [1.0, 0], sign_rule=[False, False]) 
 
 print('\n Lattice is bipartite? ')
 print(lattice.is_bipartite())
@@ -76,9 +76,10 @@ params = wf.init(subkey, jnp.zeros((1,lattice.n_nodes)))
 init_samples = jnp.zeros((1,))
 key, subkey = jax.random.split(key, 2)
 sampler_seed = subkey
+
 sampler = nk.sampler.MetropolisExchange(hilbert=hilbert,
                                         graph=lattice,
-                                        d_max=2,
+                                        d_max=L,
                                         n_chains=N_samples,
                                         sweep_size=lattice.n_nodes)
 vstate = nk.vqs.MCState(sampler=sampler, 
@@ -90,7 +91,7 @@ vstate = nk.vqs.MCState(sampler=sampler,
 
 print('Number of parameters = ', nk.jax.tree_size(vstate.parameters))
 optimizer = nk.optimizer.Sgd(learning_rate=eta)
-sr = nk.optimizer.SR(diag_shift=diag_shift) # need small diag_shift for Transformer 
+sr = nk.optimizer.SR(diag_shift=diag_shift, holomorphic=True) # need small diag_shift for Transformer 
 
 vmc = nk.VMC(
     hamiltonian=hamiltonian,
@@ -101,22 +102,6 @@ vmc = nk.VMC(
 
 ##################
 
-
-# local_energies = vstate.local_estimators(hamiltonian)
-# print(local_energies.shape)
-
-# E = vstate.expect(hamiltonian)
-
-# print('\n E = ', E)
-
-# print('\n mean of local energies = ', jnp.mean(local_energies))
-# E = vstate.expect(hamiltonian)
-
-# plt.plot(range(N_samples), local_energies)
-# plt.xlabel('Monte Carlo Iteration')
-# plt.ylabel('Energy')
-# plt.title('Energy vs. Monte Carlo Iteration')
-# plt.show()
 
 
 if 1:
@@ -142,6 +127,34 @@ if 1:
     plt.axhline(y=exact_gs_energy, xmin=0, xmax=iters[-1], linewidth=2, color='k', label='Exact')
     ax1.legend()
     plt.show()
+
+
+if 0: 
+    local_energies = vstate.local_estimators(hamiltonian)
+    print(local_energies.shape)
+
+    E = vstate.expect(hamiltonian)
+
+    print('\n E = ', E)
+
+    print('\n mean of local energies = ', jnp.mean(local_energies))
+    E = vstate.expect(hamiltonian)
+
+    # vstate.sample()
+    # print(sampler.acceptance)
+    # print(sampler)
+
+    samples = vstate.samples
+    print(samples[0])
+    print(local_energies[0])
+
+    plt.plot(range(N_samples), local_energies)
+    plt.xlabel('Monte Carlo Iteration')
+    plt.ylabel('Energy')
+    plt.title('Energy vs. Monte Carlo Iteration')
+    plt.show()
+
+
 
 #print('\n iters \n', iters)
 #print('\n energy_Re \n', energy_Re)
